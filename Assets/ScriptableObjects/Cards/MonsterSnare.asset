@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f036176d41d833949bff5515fa849a19, type: 3}
+  m_Name: MonsterSnare
+  m_EditorClassIdentifier: Assembly-CSharp::ReprieveCard
+  cardName: Monster Snare
+  description: Place a trap on a board space and deal 3 damage to the next player
+    that lands on it. It is then destroyed.
+  useTiming: 0
+  effectType: 12
+  healAmount: 0
+  mightAmount: 0
+  arcaneAmount: 0
+  goldAmount: 0
+  secondaryAmount: 0
+  pitfallBonus: 0
+  allowsReroll: 0
+  allowsSetValue: 0
+  returnsToHandOnSuccess: 0
+  becomesTitle: 0

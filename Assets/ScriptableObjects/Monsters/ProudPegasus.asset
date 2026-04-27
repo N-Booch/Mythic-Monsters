@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8c7f7c107971fec41867ee7881fd4fee, type: 3}
+  m_Name: ProudPegasus
+  m_EditorClassIdentifier: Assembly-CSharp::Monster
+  monsterName: Proud Pegasus
+  biome: 1
+  isMythicMonster: 0
+  maxHP: 17
+  might: 8
+  rewardTitle: {fileID: 11400000, guid: 64372562f0cc5954197d9fce8ed1dcec, type: 2}
+  health: 0

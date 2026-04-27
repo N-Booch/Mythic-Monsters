@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f800dd7bcfa7eed42aa07ebb01cf8549, type: 3}
+  m_Name: SirenShell
+  m_EditorClassIdentifier: Assembly-CSharp::TreasureCard
+  cardName: Siren Shell
+  description: +1 Arcane, +2 if equipped by the Siren
+  cost: 1000
+  stackable: 0
+  hpModifier: 0
+  mightModifier: 0
+  arcaneModifier: 1
+  maxHandModifier: 0
+  maxEquipModifier: 0
+  pitfallBonus: 0
+  blocksRunaway: 0
+  blocksReprieveUse: 0
+  effectType: 0
+  triggerType: 0

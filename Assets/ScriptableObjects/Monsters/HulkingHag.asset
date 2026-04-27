@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8c7f7c107971fec41867ee7881fd4fee, type: 3}
+  m_Name: HulkingHag
+  m_EditorClassIdentifier: Assembly-CSharp::Monster
+  monsterName: Hulking Hag
+  biome: 2
+  isMythicMonster: 0
+  maxHP: 12
+  might: 9
+  rewardTitle: {fileID: 11400000, guid: 73ec1f93adbe03d4e9a3745f8a26ce7f, type: 2}
+  health: 0
