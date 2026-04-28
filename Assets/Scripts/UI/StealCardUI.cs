@@ -16,25 +16,10 @@ public class StealCardUI : MonoBehaviour
 
     private void Awake()
     {
-        if (Instance == null)
-            Instance = this;
-        else
-        {
-            Destroy(gameObject);
-            return;
-        }
-
-        if (instructionText == null)
-            Debug.LogError("StealCardUI: InstructionText not assigned");
-
-        if (cancelButton == null)
-            Debug.LogError("StealCardUI: CancelButton not assigned");
-
-        cancelButton.onClick.RemoveAllListeners();
-        cancelButton.onClick.AddListener(OnCancelClicked);
-
-        cancelButton.interactable = false;
+        // This legacy UI has been fully replaced by PlayerSelectionUI + HandUIManager.
+        // Retire any scene-baked copies immediately so they never render or intercept input.
         gameObject.SetActive(false);
+        Destroy(gameObject);
     }
 
     public void Show(PlayerPawn user)
@@ -44,10 +29,20 @@ public class StealCardUI : MonoBehaviour
 
     public void Show(string instruction, Action cancelAction = null)
     {
+        Show(instruction, cancelAction, true);
+    }
+
+    public void Show(string instruction, Action cancelAction, bool showInstruction)
+    {
         IsActive = true;
         gameObject.SetActive(true);
 
-        instructionText.text = instruction;
+        if (instructionText != null)
+        {
+            instructionText.text = instruction;
+            instructionText.gameObject.SetActive(showInstruction);
+        }
+
         customCancelAction = cancelAction;
         cancelButton.interactable = true;
 
@@ -57,6 +52,9 @@ public class StealCardUI : MonoBehaviour
     public void Hide()
     {
         IsActive = false;
+
+        if (instructionText != null)
+            instructionText.gameObject.SetActive(true);
 
         cancelButton.interactable = false;
         gameObject.SetActive(false);

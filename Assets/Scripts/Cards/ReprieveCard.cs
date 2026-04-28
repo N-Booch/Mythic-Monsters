@@ -638,14 +638,6 @@ public class ReprieveCard : ScriptableObject
             return;
         }
 
-        StealCardUI.Instance.Show(
-            $"{user.playerName}: choose a player to steal a reprieve from",
-            () =>
-            {
-                ShopManager.Instance?.ResumeTradeUI();
-                GameManager.Instance.CancelPendingReprieve();
-            });
-
         PlayerSelectionUI.EnsureExists();
         PlayerSelectionUI.Instance.BeginSelection(
             eligibleTargets,
@@ -654,19 +646,10 @@ public class ReprieveCard : ScriptableObject
             {
                 if (target == null)
                 {
-                    StealCardUI.Instance.Hide();
                     ShopManager.Instance?.ResumeTradeUI();
                     GameManager.Instance.CancelPendingReprieve();
                     return;
                 }
-
-                StealCardUI.Instance.Show(
-                    $"{user.playerName}: choose 1 reprieve to steal from {target.playerName}",
-                    () =>
-                    {
-                        ShopManager.Instance?.ResumeTradeUI();
-                        GameManager.Instance.CancelPendingReprieve();
-                    });
 
                 HandUIManager.Instance.BeginCardSelection(
                     target,
@@ -674,20 +657,21 @@ public class ReprieveCard : ScriptableObject
                     stolenCard =>
                     {
                         if (stolenCard == null)
-                        {
-                            StealCardUI.Instance.Hide();
-                            ShopManager.Instance?.ResumeTradeUI();
-                            GameManager.Instance.CancelPendingReprieve();
                             return;
-                        }
 
                         target.hand.Remove(stolenCard);
                         user.hand.Add(stolenCard);
 
-                        StealCardUI.Instance.Hide();
                         HandUIManager.Instance.Refresh();
                         ShopManager.Instance?.ResumeTradeUI();
                         GameManager.Instance.ResolvePendingReprieve();
+                    },
+                    true,
+                    "Cancel Hoarder's Honey",
+                    () =>
+                    {
+                        ShopManager.Instance?.ResumeTradeUI();
+                        GameManager.Instance.CancelPendingReprieve();
                     }
                 );
             },

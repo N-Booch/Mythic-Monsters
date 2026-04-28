@@ -19,6 +19,7 @@ public class DiceManager : MonoBehaviour
     public int LastRoll => lastRoll;
 
     private PlayerPawn currentPlayer;
+    public PlayerPawn PendingRollPlayer => currentPlayer;
     private Action<int> currentCallback;
     private bool awaitingDecision;
 

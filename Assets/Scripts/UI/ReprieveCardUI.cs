@@ -44,6 +44,8 @@ public class ReprieveCardUI : MonoBehaviour
 
     private void HideLegacyVisuals()
     {
+        Transform standardVisualRoot = transform.Find("StandardCardVisual");
+
         if (nameText != null)
             nameText.gameObject.SetActive(false);
 
@@ -62,6 +64,24 @@ public class ReprieveCardUI : MonoBehaviour
                 continue;
 
             child.gameObject.SetActive(false);
+        }
+
+        TMP_Text[] legacyTexts = GetComponentsInChildren<TMP_Text>(true);
+        foreach (TMP_Text tmp in legacyTexts)
+        {
+            if (tmp == null)
+                continue;
+
+            if (nameText != null && tmp == nameText)
+                continue;
+
+            if (descriptionText != null && tmp == descriptionText)
+                continue;
+
+            if (standardVisualRoot != null && tmp.transform.IsChildOf(standardVisualRoot))
+                continue;
+
+            tmp.gameObject.SetActive(false);
         }
     }
 

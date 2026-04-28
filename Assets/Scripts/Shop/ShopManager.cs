@@ -24,6 +24,8 @@ public class ShopManager : MonoBehaviour
 
     public static ShopManager Instance;
 
+    public PlayerPawn CurrentTradePlayer => currentPlayer;
+
     private PlayerPawn currentPlayer;
     private int pendingFreeTreasurePurchases;
     private TradeMode currentMode = TradeMode.None;
@@ -126,6 +128,19 @@ public class ShopManager : MonoBehaviour
             activeOffers[index] = null;
             UpdateItemButtons();
         });
+    }
+
+    public bool TryBuyOfferByRequest(int index)
+    {
+        if (currentPlayer == null || index < 0 || index >= activeOffers.Length)
+            return false;
+
+        TreasureCard offer = activeOffers[index];
+        if (offer == null)
+            return false;
+
+        BuyItemAtIndex(index);
+        return true;
     }
 
     public void CloseShop()
@@ -307,6 +322,15 @@ public class ShopManager : MonoBehaviour
             "Cancel Sale");
     }
 
+    public bool TrySellTreasureByRequest()
+    {
+        if (currentPlayer == null || currentPlayer.equippedTreasures == null || currentPlayer.equippedTreasures.Count == 0)
+            return false;
+
+        SellSelectedTreasure();
+        return true;
+    }
+
     private void CloseTradeInternal(bool notifyPlayer)
     {
         bool preserveWanderingTraderOffers = currentMode == TradeMode.WanderingTrader && !notifyPlayer;
@@ -382,7 +406,7 @@ public class ShopManager : MonoBehaviour
                 UpdateButtonText(button, offer, displayCost);
 
                 button.onClick.RemoveAllListeners();
-                button.onClick.AddListener(() => BuyItemAtIndex(itemIndex));
+                button.onClick.AddListener(() => GameManager.Instance?.OnTradeOfferRequested(currentPlayer, itemIndex));
             }
             else
             {
@@ -630,7 +654,7 @@ public class ShopManager : MonoBehaviour
         image.color = new Color(0.20f, 0.15f, 0.08f, 1f);
 
         sellTreasureButton = buttonObject.GetComponent<Button>();
-        sellTreasureButton.onClick.AddListener(SellSelectedTreasure);
+        sellTreasureButton.onClick.AddListener(() => GameManager.Instance?.OnTradeSellRequested(currentPlayer));
 
         GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
         labelObject.transform.SetParent(buttonObject.transform, false);

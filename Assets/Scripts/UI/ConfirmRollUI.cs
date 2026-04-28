@@ -26,7 +26,7 @@ public class ConfirmRollUI : MonoBehaviour
 
     public void OnConfirmClicked()
     {
-        DiceManager.Instance.ConfirmRoll();
+        GameManager.Instance?.OnConfirmRollButtonPressed();
     }
 
 }

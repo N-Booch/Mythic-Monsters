@@ -1,5 +1,6 @@
 public enum GameState
 {
+    Setup,
     WaitingForRoll,
     Moving,
     Combat,

@@ -2,12 +2,74 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum GameActionType
+{
+    RollPrimary,
+    AdvanceTurn,
+    OpenTreasureSelection,
+    ConfirmPrimary,
+    SelectMonster,
+    BuyTradeOffer,
+    SellTradeTreasure,
+    SetupPrimary,
+    SetupSelectCard
+}
+
+public struct GameActionRequest
+{
+    public GameActionType actionType;
+    public int actorIndex;
+    public GameState stateAtRequest;
+    public int optionIndex;
+    public string optionId;
+
+    public GameActionRequest(GameActionType actionType, int actorIndex, GameState stateAtRequest)
+    {
+        this.actionType = actionType;
+        this.actorIndex = actorIndex;
+        this.stateAtRequest = stateAtRequest;
+        optionIndex = -1;
+        optionId = null;
+    }
+
+    public GameActionRequest(GameActionType actionType, int actorIndex, GameState stateAtRequest, int optionIndex, string optionId)
+    {
+        this.actionType = actionType;
+        this.actorIndex = actorIndex;
+        this.stateAtRequest = stateAtRequest;
+        this.optionIndex = optionIndex;
+        this.optionId = optionId;
+    }
+
+    public override string ToString()
+    {
+        return $"{actionType} (ActorIndex={actorIndex}, State={stateAtRequest}, OptionIndex={optionIndex}, OptionId={optionId})";
+    }
+}
+
 public class GameManager : MonoBehaviour
 {
     private sealed class PendingSinnersSceptreEffect
     {
         public PlayerPawn owner;
         public int burstsRemaining;
+    }
+
+    private sealed class MatchSetupCharacterDefinition
+    {
+        public string characterName;
+        public int startingIndex;
+        public int baseMaxHP;
+        public int baseMight;
+        public int baseArcane;
+        public Sprite boardSpriteOverride;
+    }
+
+    private sealed class MatchSetupCardState
+    {
+        public MatchSetupCharacterDefinition character;
+        public bool isClaimed;
+        public PlayerPawn claimedBy;
     }
 
     // ============================
@@ -32,6 +94,7 @@ public class GameManager : MonoBehaviour
     [Header("Players")]
     public PlayerPawn[] players;
     public bool randomizeTurnOrderAtGameStart = true;
+    public bool runCharacterDraftAtGameStart = true;
     private int activePlayerIndex = 0;
 
     // ============================
@@ -63,11 +126,60 @@ public class GameManager : MonoBehaviour
     private bool isGameOver = false;
     private PlayerPawn temporaryActionPlayer;
     private readonly Queue<PendingSinnersSceptreEffect> pendingSinnersSceptreEffects = new Queue<PendingSinnersSceptreEffect>();
+    private readonly Dictionary<PlayerPawn, int> setupSeatIndices = new Dictionary<PlayerPawn, int>();
+    private bool setupPrimaryActionTriggered;
+    private bool setupAwaitingPrimaryAction;
+    private PlayerPawn setupExpectedPrimaryActor;
+    private int setupSelectedCardIndex = -1;
+    private bool setupAwaitingCardSelection;
+    private PlayerPawn setupExpectedCardSelector;
+    private readonly HashSet<int> setupSelectableCardIndices = new HashSet<int>();
 
     public GameState CurrentState { get; private set; }
     public bool IsGameOver => isGameOver;
     private readonly List<PlayerPawn> caveTurnOrder = new List<PlayerPawn>();
     private int caveTurnIndex = -1;
+
+    /// <summary>
+    /// Networking prep seam: both local UI and future remote peers should submit
+    /// explicit action requests instead of reaching into turn logic directly.
+    /// </summary>
+    public bool TryExecuteActionRequest(GameActionRequest request)
+    {
+        switch (request.actionType)
+        {
+            case GameActionType.RollPrimary:
+                return TryExecuteRollActionRequest(request);
+
+            case GameActionType.AdvanceTurn:
+                return TryExecuteAdvanceTurnRequest(request);
+
+            case GameActionType.OpenTreasureSelection:
+                return TryExecuteOpenTreasureRequest(request);
+
+            case GameActionType.ConfirmPrimary:
+                return TryExecuteConfirmActionRequest(request);
+
+            case GameActionType.SelectMonster:
+                return TryExecuteSelectMonsterActionRequest(request);
+
+            case GameActionType.BuyTradeOffer:
+                return TryExecuteBuyTradeOfferActionRequest(request);
+
+            case GameActionType.SellTradeTreasure:
+                return TryExecuteSellTradeTreasureActionRequest(request);
+
+            case GameActionType.SetupPrimary:
+                return TryExecuteSetupPrimaryActionRequest(request);
+
+            case GameActionType.SetupSelectCard:
+                return TryExecuteSetupSelectCardActionRequest(request);
+
+            default:
+                Debug.LogWarning($"Unhandled action request: {request}");
+                return false;
+        }
+    }
 
     // ============================
     // Input Mode Control
@@ -97,6 +209,7 @@ public class GameManager : MonoBehaviour
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
 
+        GameSessionBootstrap.EnsureExists();
         EnsureTitleSystemExists();
         TreasureDeck.EnsureExists();
         MonsterRoster.EnsureExists();
@@ -107,23 +220,41 @@ public class GameManager : MonoBehaviour
     {
         // Initialize deck
         ReprieveDeck.Instance.InitializeDeck();
+        BoardActionBarLayoutUI.EnsureExists();
 
-        // Setup players
-        foreach (PlayerPawn player in players)
+        setupSeatIndices.Clear();
+        for (int i = 0; i < players.Length; i++)
         {
-            // Starting hand
-            for (int i = 0; i < 2; i++)
-                player.hand.Add(ReprieveDeck.Instance.DrawCard());
-
-            // Starting position
-            player.PlaceAtIndex(player.startingIndex);
-            player.SetActiveVisual(false);
+            if (players[i] != null)
+                setupSeatIndices[players[i]] = i;
         }
 
+        if (runCharacterDraftAtGameStart)
+        {
+            StartCoroutine(BeginMatchSetupRoutine());
+            return;
+        }
+
+        SetupPlayersForImmediateStart();
         RandomizeInitialTurnOrder();
         activePlayerIndex = 0;
         StartTurn(GetActivePlayer());
-        BoardActionBarLayoutUI.EnsureExists();
+    }
+
+    private void SetupPlayersForImmediateStart()
+    {
+        foreach (PlayerPawn player in players)
+        {
+            if (player == null)
+                continue;
+
+            for (int i = 0; i < 2; i++)
+                player.hand.Add(ReprieveDeck.Instance.DrawCard());
+
+            player.PlaceAtIndex(player.startingIndex);
+            player.SetBoardPresenceVisible(true);
+            player.SetActiveVisual(false);
+        }
     }
 
     private void RandomizeInitialTurnOrder()
@@ -145,6 +276,458 @@ public class GameManager : MonoBehaviour
         }
 
         Debug.Log($"Randomized turn order: {string.Join(" -> ", orderedNames)}");
+    }
+
+    private IEnumerator BeginMatchSetupRoutine()
+    {
+        SetInputMode(InputMode.Normal);
+        SetState(GameState.Setup);
+        LockActionButtons();
+        DiceManager.Instance?.ResetTurnPresentation();
+        SetBoardHudVisibleForSetup(false);
+
+        PreparePlayersForMatchSetup();
+
+        CharacterDraftSetupUI setupUI = CharacterDraftSetupUI.EnsureExists();
+        setupUI.Show();
+
+        List<MatchSetupCardState> cards = BuildMatchSetupCards();
+        ShuffleList(cards);
+        Dictionary<PlayerPawn, MatchSetupCharacterDefinition> assignments = new Dictionary<PlayerPawn, MatchSetupCharacterDefinition>();
+        List<PlayerPawn> unassignedPlayers = new List<PlayerPawn>(players);
+
+        int pickNumber = 1;
+        while (unassignedPlayers.Count > 0)
+        {
+            PlayerPawn chooser = null;
+            yield return ResolveHighestRollWinnerForSetup(setupUI, unassignedPlayers, assignments, cards, "Character Draft", $"Pick {pickNumber}: highest roll chooses a face-down card.", (winner, _) => chooser = winner);
+
+            int chosenCardIndex = -1;
+            bool selectionResolved = false;
+            setupUI.SetHeading("Match Setup", "Character Draft", $"{GetSetupSeatLabel(chooser)} won the roll. Choose a face-down card.");
+            setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, null, chooser, null, "Currently Selecting"));
+            ArmSetupCardSelection(cards, chooser);
+            ApplyCardPresentation(setupUI, cards, chooser, index => OnSetupCardRequested(chooser, index));
+            setupUI.SetPrimaryAction(string.Empty, null, false);
+
+            while (!selectionResolved)
+            {
+                if (setupSelectedCardIndex >= 0)
+                {
+                    chosenCardIndex = setupSelectedCardIndex;
+                    selectionResolved = true;
+                }
+
+                yield return null;
+            }
+
+            ClearSetupCardSelectionArm();
+
+            MatchSetupCardState chosenCard = cards[chosenCardIndex];
+            chosenCard.isClaimed = true;
+            chosenCard.claimedBy = chooser;
+            assignments[chooser] = chosenCard.character;
+            chooser.ConfigureMatchIdentity(
+                chosenCard.character.characterName,
+                chosenCard.character.startingIndex,
+                chosenCard.character.baseMaxHP,
+                chosenCard.character.baseMight,
+                chosenCard.character.baseArcane,
+                chosenCard.character.boardSpriteOverride);
+
+            unassignedPlayers.Remove(chooser);
+            pickNumber++;
+
+            setupUI.SetHeading("Match Setup", "Character Draft", $"{GetSetupSeatLabel(chooser)} claimed {chosenCard.character.characterName}.");
+            setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, null, null));
+            ApplyCardPresentation(setupUI, cards, null, null);
+
+            yield return WaitForSetupPrimaryAction(setupUI, unassignedPlayers.Count > 0 ? "Next Pick" : "Roll Turn Order");
+        }
+
+        foreach (PlayerPawn player in players)
+        {
+            if (player == null)
+                continue;
+
+            for (int i = 0; i < 2; i++)
+                player.hand.Add(ReprieveDeck.Instance.DrawCard());
+        }
+
+        List<PlayerPawn> orderedPlayers = null;
+        yield return ResolveOrderedTurnOrderForSetup(setupUI, assignments, cards, new List<PlayerPawn>(players), result => orderedPlayers = result);
+
+        if (orderedPlayers != null && orderedPlayers.Count == players.Length)
+            players = orderedPlayers.ToArray();
+
+        activePlayerIndex = 0;
+        setupUI.SetHeading("Match Setup", "Match Ready", $"Turn order: {BuildTurnOrderSummary(players)}");
+        setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, null, players.Length > 0 ? players[0] : null, new List<PlayerPawn>(players), "First Turn"));
+        ApplyCardPresentation(setupUI, cards, null, null);
+
+        yield return WaitForSetupPrimaryAction(setupUI, "Begin Match");
+
+        setupUI.Hide();
+        SetBoardHudVisibleForSetup(true);
+
+        StartTurn(GetActivePlayer());
+    }
+
+    private void SetBoardHudVisibleForSetup(bool visible)
+    {
+        if (playerHUD != null)
+            playerHUD.gameObject.SetActive(visible);
+
+        if (endTurnButtonUI != null)
+            endTurnButtonUI.gameObject.SetActive(visible);
+
+        RollButtonUI rollButton = FindFirstObjectByType<RollButtonUI>(FindObjectsInactive.Include);
+        if (rollButton != null)
+            rollButton.gameObject.SetActive(visible);
+
+        SeeHandButtonUI seeHandButton = FindFirstObjectByType<SeeHandButtonUI>(FindObjectsInactive.Include);
+        if (seeHandButton != null)
+            seeHandButton.gameObject.SetActive(visible);
+
+        if (confirmRollButton != null)
+            confirmRollButton.SetActive(false);
+
+        if (DiceManager.Instance != null && DiceManager.Instance.diceUI != null)
+            DiceManager.Instance.diceUI.gameObject.SetActive(visible);
+
+        BoardActionBarLayoutUI actionBar = FindFirstObjectByType<BoardActionBarLayoutUI>(FindObjectsInactive.Include);
+        if (actionBar != null)
+            actionBar.SetVisible(visible);
+    }
+
+    private void PreparePlayersForMatchSetup()
+    {
+        foreach (PlayerPawn player in players)
+        {
+            if (player == null)
+                continue;
+
+            player.ClearHandToDiscard();
+            player.equippedTreasures.Clear();
+            player.titles.Clear();
+            player.cleansedTitles.Clear();
+            player.nextCombatArcaneBonus = 0;
+            player.nextCombatMightBonus = 0;
+            player.glisteningRingObservedMonsterSlays = 0;
+            player.pendingGlisteningRingRewards = 0;
+            player.monstersDefeatedInCombat = 0;
+            player.gold = 200;
+            player.inCavePhase = false;
+            player.isDead = false;
+            player.isMoving = false;
+            player.isResolvingSpace = false;
+            player.SetActiveVisual(false);
+            player.SetBoardPresenceVisible(false);
+            player.UpdateMaxStats();
+        }
+    }
+
+    private List<MatchSetupCardState> BuildMatchSetupCards()
+    {
+        List<MatchSetupCardState> cards = new List<MatchSetupCardState>();
+
+        foreach (PlayerPawn player in players)
+        {
+            if (player == null)
+                continue;
+
+            cards.Add(new MatchSetupCardState
+            {
+                character = new MatchSetupCharacterDefinition
+                {
+                    characterName = player.playerName,
+                    startingIndex = player.startingIndex,
+                    baseMaxHP = player.baseMaxHP,
+                    baseMight = player.baseMight,
+                    baseArcane = player.baseArcane,
+                    boardSpriteOverride = player.boardSpriteOverride
+                }
+            });
+        }
+
+        return cards;
+    }
+
+    private IEnumerator ResolveHighestRollWinnerForSetup(CharacterDraftSetupUI setupUI, List<PlayerPawn> contenders, Dictionary<PlayerPawn, MatchSetupCharacterDefinition> assignments, List<MatchSetupCardState> cards, string phaseLabel, string detailLabel, System.Action<PlayerPawn, int> onResolved, IReadOnlyList<PlayerPawn> resolvedTurnOrder = null, string winnerLabel = "Won Roll")
+    {
+        List<PlayerPawn> playersToRoll = new List<PlayerPawn>(contenders);
+        Dictionary<PlayerPawn, int> lastRolls = new Dictionary<PlayerPawn, int>();
+
+        while (playersToRoll.Count > 0)
+        {
+            string rollPrompt = playersToRoll.Count == contenders.Count ? "Roll Dice" : "Reroll Tie";
+            setupUI.SetHeading("Match Setup", phaseLabel, detailLabel);
+            setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, lastRolls, null, resolvedTurnOrder));
+            ApplyCardPresentation(setupUI, cards, null, null);
+            yield return WaitForSetupPrimaryAction(setupUI, rollPrompt);
+
+            lastRolls.Clear();
+            int highestRoll = int.MinValue;
+            foreach (PlayerPawn player in playersToRoll)
+            {
+                int roll = Random.Range(1, 7);
+                lastRolls[player] = roll;
+                if (roll > highestRoll)
+                    highestRoll = roll;
+            }
+
+            List<PlayerPawn> tiedHighestPlayers = new List<PlayerPawn>();
+            foreach (PlayerPawn player in playersToRoll)
+            {
+                if (lastRolls[player] == highestRoll)
+                    tiedHighestPlayers.Add(player);
+            }
+
+            if (tiedHighestPlayers.Count == 1)
+            {
+                PlayerPawn winner = tiedHighestPlayers[0];
+                setupUI.SetHeading("Match Setup", phaseLabel, $"{GetSetupSeatLabel(winner)} won with a {highestRoll}.");
+                setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, lastRolls, winner, resolvedTurnOrder, winnerLabel));
+                ApplyCardPresentation(setupUI, cards, null, null);
+
+                yield return WaitForSetupPrimaryAction(setupUI, "Continue");
+
+                onResolved?.Invoke(winner, highestRoll);
+                yield break;
+            }
+
+            setupUI.SetHeading("Match Setup", phaseLabel, $"Tie on {highestRoll}. Only tied players reroll.");
+            setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, lastRolls, null, resolvedTurnOrder));
+            ApplyCardPresentation(setupUI, cards, null, null);
+
+            yield return WaitForSetupPrimaryAction(setupUI, "Continue");
+
+            playersToRoll = tiedHighestPlayers;
+        }
+    }
+
+    private IEnumerator ResolveOrderedTurnOrderForSetup(CharacterDraftSetupUI setupUI, Dictionary<PlayerPawn, MatchSetupCharacterDefinition> assignments, List<MatchSetupCardState> cards, List<PlayerPawn> turnOrderPlayers, System.Action<List<PlayerPawn>> onResolved)
+    {
+        Dictionary<PlayerPawn, int> finalRolls = new Dictionary<PlayerPawn, int>();
+        List<PlayerPawn> unorderedPlayers = new List<PlayerPawn>(turnOrderPlayers);
+        List<PlayerPawn> orderedPlayers = new List<PlayerPawn>();
+
+        while (unorderedPlayers.Count > 0)
+        {
+            PlayerPawn nextOrderedPlayer = null;
+            int winningRoll = 0;
+            int nextTurnSlot = orderedPlayers.Count + 1;
+            yield return ResolveHighestRollWinnerForSetup(
+                setupUI,
+                unorderedPlayers,
+                assignments,
+                cards,
+                "Turn Order",
+                $"Highest roll takes turn slot #{nextTurnSlot}.",
+                (winner, roll) =>
+                {
+                    nextOrderedPlayer = winner;
+                    winningRoll = roll;
+                },
+                orderedPlayers,
+                $"Turn Slot #{nextTurnSlot}");
+
+            if (nextOrderedPlayer == null)
+                yield break;
+
+            orderedPlayers.Add(nextOrderedPlayer);
+            finalRolls[nextOrderedPlayer] = winningRoll;
+            unorderedPlayers.Remove(nextOrderedPlayer);
+
+            if (unorderedPlayers.Count > 0)
+            {
+                setupUI.SetHeading("Match Setup", "Turn Order", $"{GetSetupSeatLabel(nextOrderedPlayer)} locked in turn slot #{nextTurnSlot}.");
+                setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, finalRolls, null, orderedPlayers));
+                ApplyCardPresentation(setupUI, cards, null, null);
+
+                yield return WaitForSetupPrimaryAction(setupUI, "Next Roll");
+            }
+        }
+
+        setupUI.SetHeading("Match Setup", "Turn Order", $"Order decided: {BuildTurnOrderSummary(orderedPlayers)}");
+        setupUI.SetPlayerSlots(BuildSetupSlotSummaries(assignments, finalRolls, orderedPlayers.Count > 0 ? orderedPlayers[0] : null, orderedPlayers, "First Turn"));
+        ApplyCardPresentation(setupUI, cards, null, null);
+
+        yield return WaitForSetupPrimaryAction(setupUI, "Continue");
+
+        onResolved?.Invoke(orderedPlayers);
+    }
+
+    private IEnumerator WaitForSetupPrimaryAction(CharacterDraftSetupUI setupUI, string label, PlayerPawn expectedActor = null)
+    {
+        ArmSetupPrimaryAction(expectedActor);
+        setupUI.SetPrimaryAction(label, OnSetupPrimaryRequested, true);
+
+        while (!setupPrimaryActionTriggered)
+            yield return null;
+
+        ClearSetupPrimaryActionArm();
+    }
+
+    private void ArmSetupPrimaryAction(PlayerPawn expectedActor)
+    {
+        setupExpectedPrimaryActor = expectedActor;
+        setupAwaitingPrimaryAction = true;
+        setupPrimaryActionTriggered = false;
+    }
+
+    private void ClearSetupPrimaryActionArm()
+    {
+        setupExpectedPrimaryActor = null;
+        setupAwaitingPrimaryAction = false;
+        setupPrimaryActionTriggered = false;
+    }
+
+    private void ArmSetupCardSelection(IReadOnlyList<MatchSetupCardState> cards, PlayerPawn selectingPlayer)
+    {
+        setupAwaitingCardSelection = true;
+        setupExpectedCardSelector = selectingPlayer;
+        setupSelectedCardIndex = -1;
+        setupSelectableCardIndices.Clear();
+
+        if (cards == null)
+            return;
+
+        for (int i = 0; i < cards.Count; i++)
+        {
+            MatchSetupCardState card = cards[i];
+            if (card != null && !card.isClaimed)
+                setupSelectableCardIndices.Add(i);
+        }
+    }
+
+    private void ClearSetupCardSelectionArm()
+    {
+        setupAwaitingCardSelection = false;
+        setupExpectedCardSelector = null;
+        setupSelectedCardIndex = -1;
+        setupSelectableCardIndices.Clear();
+    }
+
+    private void ApplyCardPresentation(CharacterDraftSetupUI setupUI, List<MatchSetupCardState> cards, PlayerPawn selectingPlayer, System.Action<int> onSelect)
+    {
+        List<string> titles = new List<string>();
+        List<string> details = new List<string>();
+        List<bool> selectable = new List<bool>();
+
+        foreach (MatchSetupCardState card in cards)
+        {
+            if (card == null)
+                continue;
+
+            if (card.isClaimed)
+            {
+                titles.Add(card.character.characterName);
+                details.Add($"Claimed by {GetSetupSeatLabel(card.claimedBy)}\nHP {card.character.baseMaxHP}  |  Might {card.character.baseMight}  |  Arcane {card.character.baseArcane}");
+                selectable.Add(false);
+                continue;
+            }
+
+            titles.Add("Face-Down Card");
+            details.Add(selectingPlayer != null
+                ? "Click to claim this hidden character."
+                : "Waiting for the next winning roll.");
+            selectable.Add(selectingPlayer != null);
+        }
+
+        setupUI.SetCards(titles, details, selectable, onSelect);
+    }
+
+    private List<string> BuildSetupSlotSummaries(Dictionary<PlayerPawn, MatchSetupCharacterDefinition> assignments, Dictionary<PlayerPawn, int> rolls, PlayerPawn highlightedPlayer, IReadOnlyList<PlayerPawn> resolvedTurnOrder = null, string highlightedLabel = "Currently Selecting")
+    {
+        List<string> summaries = new List<string>();
+
+        foreach (PlayerPawn player in players)
+        {
+            if (player == null)
+                continue;
+
+            string seatLabel = GetSetupSeatLabel(player);
+            string summary;
+            if (assignments != null && assignments.TryGetValue(player, out MatchSetupCharacterDefinition assignedCharacter))
+            {
+                summary = $"{seatLabel}\n{assignedCharacter.characterName}  |  HP {assignedCharacter.baseMaxHP}  Might {assignedCharacter.baseMight}  Arcane {assignedCharacter.baseArcane}";
+            }
+            else
+            {
+                summary = $"{seatLabel}\nUnassigned";
+            }
+
+            if (rolls != null && rolls.TryGetValue(player, out int roll))
+                summary += $"\nRoll: {roll}";
+
+            if (resolvedTurnOrder != null)
+            {
+                int orderIndex = -1;
+                for (int i = 0; i < resolvedTurnOrder.Count; i++)
+                {
+                    if (resolvedTurnOrder[i] == player)
+                    {
+                        orderIndex = i;
+                        break;
+                    }
+                }
+
+                if (orderIndex >= 0)
+                    summary += $"\nTurn Order: #{orderIndex + 1}";
+            }
+
+            if (highlightedPlayer == player)
+                summary += $"\n{highlightedLabel}";
+
+            summaries.Add(summary);
+        }
+
+        while (summaries.Count < 4)
+            summaries.Add(string.Empty);
+
+        return summaries;
+    }
+
+    private string BuildTurnOrderSummary(IReadOnlyList<PlayerPawn> orderedPlayers)
+    {
+        List<string> names = new List<string>();
+        if (orderedPlayers != null)
+        {
+            foreach (PlayerPawn player in orderedPlayers)
+            {
+                if (player != null)
+                    names.Add(player.playerName);
+            }
+        }
+
+        return string.Join(" -> ", names);
+    }
+
+    private string GetSetupSeatLabel(PlayerPawn player)
+    {
+        int seatIndex = GetSetupSeatIndex(player);
+        return seatIndex >= 0 ? $"Player {seatIndex + 1}" : player != null ? player.playerName : "Player";
+    }
+
+    private int GetSetupSeatIndex(PlayerPawn player)
+    {
+        if (player != null && setupSeatIndices.TryGetValue(player, out int seatIndex))
+            return seatIndex;
+
+        return -1;
+    }
+
+    private void ShuffleList<T>(List<T> list)
+    {
+        if (list == null)
+            return;
+
+        for (int i = list.Count - 1; i > 0; i--)
+        {
+            int swapIndex = Random.Range(0, i + 1);
+            (list[i], list[swapIndex]) = (list[swapIndex], list[i]);
+        }
     }
 
     // =========================================================
@@ -268,7 +851,11 @@ public class GameManager : MonoBehaviour
 
     public void AdvanceTurnFromButton()
     {
-        AdvanceTurnFromButtonInternal(false);
+        PlayerPawn activePlayer = GetActivePlayer();
+        if (activePlayer == null)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(GameActionType.AdvanceTurn, activePlayer));
     }
 
     private void AdvanceTurnFromButtonInternal(bool skipUnusedReprievePrompt)
@@ -986,7 +1573,8 @@ public class GameManager : MonoBehaviour
     {
         bool standardDicePending = DiceManager.Instance != null && DiceManager.Instance.HasPendingRoll;
         bool combatDicePending = CombatManager.Instance != null && CombatManager.Instance.HasPendingCombatRoll;
-        return standardDicePending || combatDicePending;
+        bool pilferDicePending = PilferManager.Instance != null && PilferManager.Instance.HasPendingPilferRoll;
+        return standardDicePending || combatDicePending || pilferDicePending;
     }
 
     public void OnForcedDiscardCardChosen(PlayerPawn player)
@@ -1190,33 +1778,82 @@ public class GameManager : MonoBehaviour
 
     public void OnRollButtonPressed()
     {
-        if (isGameOver)
+        PlayerPawn activePlayer = GetActivePlayer();
+        if (activePlayer == null)
             return;
 
-        if (IsPendingReprieveActive)
-        {
-            Debug.LogWarning("Cannot roll while a multi-step card action is active.");
-            return;
-        }
-
-        if (CurrentState == GameState.Pilfer && PilferManager.Instance != null)
-        {
-            PilferManager.Instance.StartPilferRoll();
-            return;
-        }
-
-        if (CurrentState == GameState.Combat && CombatManager.Instance != null)
-        {
-            CombatManager.Instance.StartCombatRoll();
-            return;
-        }
-
-        RollForMovement();
+        TryExecuteActionRequest(CreateActionRequest(GameActionType.RollPrimary, activePlayer));
     }
 
     public void OnUseTreasureButtonPressed()
     {
-        OpenTreasureActivationSelection(GetCurrentTreasureUser());
+        PlayerPawn treasureUser = GetCurrentTreasureUser();
+        if (treasureUser == null)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(GameActionType.OpenTreasureSelection, treasureUser));
+    }
+
+    public void OnConfirmRollButtonPressed()
+    {
+        PlayerPawn confirmingPlayer = GetCurrentConfirmActionPlayer();
+        if (confirmingPlayer == null)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(GameActionType.ConfirmPrimary, confirmingPlayer));
+    }
+
+    public void OnMonsterSelectionRequested(PlayerPawn selectingPlayer, Monster selectedMonster)
+    {
+        if (selectingPlayer == null || selectedMonster == null)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(
+            GameActionType.SelectMonster,
+            selectingPlayer,
+            -1,
+            GetMonsterSelectionId(selectedMonster)));
+    }
+
+    public void OnTradeOfferRequested(PlayerPawn buyingPlayer, int offerIndex)
+    {
+        if (buyingPlayer == null || offerIndex < 0)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(
+            GameActionType.BuyTradeOffer,
+            buyingPlayer,
+            offerIndex,
+            null));
+    }
+
+    public void OnTradeSellRequested(PlayerPawn sellingPlayer)
+    {
+        if (sellingPlayer == null)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(
+            GameActionType.SellTradeTreasure,
+            sellingPlayer,
+            -1,
+            null));
+    }
+
+    public void OnSetupPrimaryRequested()
+    {
+        TryExecuteActionRequest(CreateSystemActionRequest(GameActionType.SetupPrimary));
+    }
+
+    public void OnSetupCardRequested(PlayerPawn selectingPlayer, int cardIndex)
+    {
+        if (selectingPlayer == null)
+            return;
+
+        TryExecuteActionRequest(CreateActionRequest(
+            GameActionType.SetupSelectCard,
+            selectingPlayer,
+            cardIndex,
+            null));
     }
 
     public void SetTemporaryActionPlayer(PlayerPawn player)
@@ -1236,7 +1873,17 @@ public class GameManager : MonoBehaviour
 
     public PlayerPawn GetCurrentActionPlayer()
     {
-        return temporaryActionPlayer != null ? temporaryActionPlayer : GetActivePlayer();
+        if (temporaryActionPlayer != null)
+            return temporaryActionPlayer;
+
+        PlayerPawn pendingDecisionPlayer = GetCurrentConfirmActionPlayer();
+        if (pendingDecisionPlayer != null)
+            return pendingDecisionPlayer;
+
+        if (CurrentState == GameState.Combat && CombatManager.Instance != null && CombatManager.Instance.IsCombatActive)
+            return CombatManager.Instance.CurrentPlayer;
+
+        return GetActivePlayer();
     }
 
     public PlayerPawn GetCurrentTreasureUser()
@@ -1263,7 +1910,10 @@ public class GameManager : MonoBehaviour
         if (isGameOver || player == null || treasure == null)
             return false;
 
-        if (player != GetCurrentTreasureUser() || player.isDead || IsPendingReprieveActive)
+        if (player != GetCurrentTreasureUser() || player.isDead)
+            return false;
+
+        if (IsPendingReprieveActive && !HasOpenDiceDecision())
             return false;
 
         if (CurrentInputMode != InputMode.Normal)
@@ -2337,6 +2987,13 @@ public class GameManager : MonoBehaviour
         if (CurrentState == GameState.Pilfer && PilferManager.Instance != null && PilferManager.Instance.IsPilferActive)
             return PilferManager.Instance.CurrentRollPlayer;
 
+        PlayerPawn pendingDecisionPlayer = GetCurrentConfirmActionPlayer();
+        if (pendingDecisionPlayer != null)
+            return pendingDecisionPlayer;
+
+        if (CurrentState == GameState.Combat && CombatManager.Instance != null && CombatManager.Instance.IsCombatActive)
+            return CombatManager.Instance.CurrentPlayer;
+
         return GetActivePlayer();
     }
 
@@ -2458,6 +3115,225 @@ public class GameManager : MonoBehaviour
             "Skip Pilfer");
 
         RefreshActionAvailability();
+    }
+
+    private GameActionRequest CreateActionRequest(GameActionType actionType, PlayerPawn actor)
+    {
+        return new GameActionRequest(actionType, GetPlayerIndex(actor), CurrentState);
+    }
+
+    private GameActionRequest CreateSystemActionRequest(GameActionType actionType)
+    {
+        return new GameActionRequest(actionType, -1, CurrentState);
+    }
+
+    private GameActionRequest CreateActionRequest(GameActionType actionType, PlayerPawn actor, int optionIndex, string optionId)
+    {
+        return new GameActionRequest(actionType, GetPlayerIndex(actor), CurrentState, optionIndex, optionId);
+    }
+
+    private int GetPlayerIndex(PlayerPawn player)
+    {
+        if (player == null || players == null)
+            return -1;
+
+        for (int i = 0; i < players.Length; i++)
+        {
+            if (players[i] == player)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private bool TryExecuteRollActionRequest(GameActionRequest request)
+    {
+        if (isGameOver)
+            return false;
+
+        PlayerPawn activePlayer = GetActivePlayer();
+        if (!IsActionRequestAuthorizedForPlayer(request, activePlayer, "roll"))
+            return false;
+
+        if (IsPendingReprieveActive)
+        {
+            Debug.LogWarning("Cannot roll while a multi-step card action is active.");
+            return false;
+        }
+
+        if (CurrentState == GameState.Pilfer && PilferManager.Instance != null)
+        {
+            PilferManager.Instance.StartPilferRoll();
+            return true;
+        }
+
+        if (CurrentState == GameState.Combat && CombatManager.Instance != null)
+        {
+            CombatManager.Instance.StartCombatRoll();
+            return true;
+        }
+
+        RollForMovement();
+        return true;
+    }
+
+    private bool TryExecuteAdvanceTurnRequest(GameActionRequest request)
+    {
+        PlayerPawn activePlayer = GetActivePlayer();
+        if (!IsActionRequestAuthorizedForPlayer(request, activePlayer, "advance turn"))
+            return false;
+
+        AdvanceTurnFromButtonInternal(false);
+        return true;
+    }
+
+    private bool TryExecuteOpenTreasureRequest(GameActionRequest request)
+    {
+        PlayerPawn treasureUser = GetCurrentTreasureUser();
+        if (!IsActionRequestAuthorizedForPlayer(request, treasureUser, "open treasure selection"))
+            return false;
+
+        OpenTreasureActivationSelection(treasureUser);
+        return true;
+    }
+
+    private bool TryExecuteConfirmActionRequest(GameActionRequest request)
+    {
+        PlayerPawn confirmingPlayer = GetCurrentConfirmActionPlayer();
+        if (!IsActionRequestAuthorizedForPlayer(request, confirmingPlayer, "confirm roll"))
+            return false;
+
+        DiceManager.Instance?.ConfirmRoll();
+        return true;
+    }
+
+    private bool TryExecuteSelectMonsterActionRequest(GameActionRequest request)
+    {
+        PlayerPawn selectingPlayer = CombatManager.Instance != null
+            ? CombatManager.Instance.GetCurrentMonsterSelectionPlayer()
+            : null;
+
+        if (!IsActionRequestAuthorizedForPlayer(request, selectingPlayer, "select monster"))
+            return false;
+
+        if (CombatManager.Instance == null)
+            return false;
+
+        return CombatManager.Instance.TrySelectMonsterByRequest(request.optionIndex, request.optionId);
+    }
+
+    private bool TryExecuteBuyTradeOfferActionRequest(GameActionRequest request)
+    {
+        PlayerPawn tradePlayer = ShopManager.Instance != null
+            ? ShopManager.Instance.CurrentTradePlayer
+            : null;
+
+        if (!IsActionRequestAuthorizedForPlayer(request, tradePlayer, "buy trade offer"))
+            return false;
+
+        if (ShopManager.Instance == null)
+            return false;
+
+        return ShopManager.Instance.TryBuyOfferByRequest(request.optionIndex);
+    }
+
+    private bool TryExecuteSellTradeTreasureActionRequest(GameActionRequest request)
+    {
+        PlayerPawn tradePlayer = ShopManager.Instance != null
+            ? ShopManager.Instance.CurrentTradePlayer
+            : null;
+
+        if (!IsActionRequestAuthorizedForPlayer(request, tradePlayer, "sell trade treasure"))
+            return false;
+
+        if (ShopManager.Instance == null)
+            return false;
+
+        return ShopManager.Instance.TrySellTreasureByRequest();
+    }
+
+    private bool TryExecuteSetupPrimaryActionRequest(GameActionRequest request)
+    {
+        if (CurrentState != GameState.Setup || !setupAwaitingPrimaryAction)
+            return false;
+
+        if (!IsSetupPrimaryActionRequestAuthorized(request, "advance setup"))
+            return false;
+
+        setupPrimaryActionTriggered = true;
+        return true;
+    }
+
+    private bool TryExecuteSetupSelectCardActionRequest(GameActionRequest request)
+    {
+        if (CurrentState != GameState.Setup || !setupAwaitingCardSelection)
+            return false;
+
+        if (!IsActionRequestAuthorizedForPlayer(request, setupExpectedCardSelector, "select setup card"))
+            return false;
+
+        if (!setupSelectableCardIndices.Contains(request.optionIndex))
+        {
+            Debug.LogWarning($"Rejected setup card selection {request}. Card index is not currently selectable.");
+            return false;
+        }
+
+        setupSelectedCardIndex = request.optionIndex;
+        return true;
+    }
+
+    private PlayerPawn GetCurrentConfirmActionPlayer()
+    {
+        if (PilferManager.Instance != null && PilferManager.Instance.HasPendingPilferRoll)
+            return PilferManager.Instance.CurrentRollPlayer;
+
+        if (CombatManager.Instance != null && CombatManager.Instance.HasPendingCombatRoll)
+            return CombatManager.Instance.CurrentPlayer;
+
+        if (DiceManager.Instance != null && DiceManager.Instance.HasPendingRoll)
+            return DiceManager.Instance.PendingRollPlayer;
+
+        return null;
+    }
+
+    private bool IsActionRequestAuthorizedForPlayer(GameActionRequest request, PlayerPawn expectedPlayer, string actionLabel)
+    {
+        if (expectedPlayer == null)
+        {
+            Debug.LogWarning($"Cannot {actionLabel}: no player is available for request {request}.");
+            return false;
+        }
+
+        int expectedIndex = GetPlayerIndex(expectedPlayer);
+        if (request.actorIndex != expectedIndex)
+        {
+            Debug.LogWarning(
+                $"Rejected {actionLabel} request {request}. Expected actor index {expectedIndex} ({expectedPlayer.playerName}).");
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool IsSetupPrimaryActionRequestAuthorized(GameActionRequest request, string actionLabel)
+    {
+        if (setupExpectedPrimaryActor == null)
+        {
+            if (request.actorIndex != -1)
+            {
+                Debug.LogWarning($"Rejected {actionLabel} request {request}. Expected setup/system actor.");
+                return false;
+            }
+
+            return true;
+        }
+
+        return IsActionRequestAuthorizedForPlayer(request, setupExpectedPrimaryActor, actionLabel);
+    }
+
+    private string GetMonsterSelectionId(Monster monster)
+    {
+        return monster != null ? monster.name : string.Empty;
     }
 
 }

@@ -179,6 +179,60 @@ public class PlayerPawn : MonoBehaviour
         }
     }
 
+    public void SetBoardPresenceVisible(bool visible)
+    {
+        if (boardSpriteRenderer != null)
+            boardSpriteRenderer.enabled = visible;
+
+        if (outlineObject != null && !visible)
+            outlineObject.SetActive(false);
+    }
+
+    public void ConfigureMatchIdentity(string characterName, int characterStartingIndex, int characterBaseMaxHp, int characterBaseMight, int characterBaseArcane, Sprite characterBoardSpriteOverride)
+    {
+        EnsureCollections();
+
+        playerName = characterName;
+        startingIndex = characterStartingIndex;
+        baseMaxHP = characterBaseMaxHp;
+        baseMight = characterBaseMight;
+        baseArcane = characterBaseArcane;
+        boardSpriteOverride = characterBoardSpriteOverride;
+
+        bonusHP = 0;
+        bonusMight = 0;
+        bonusArcane = 0;
+        nextCombatMightBonus = 0;
+        nextCombatArcaneBonus = 0;
+        monstersDefeatedInCombat = 0;
+        glisteningRingObservedMonsterSlays = 0;
+        pendingGlisteningRingRewards = 0;
+        maxHandSize = 4;
+        gold = 200;
+        inCavePhase = false;
+        preCaveSpace = null;
+        pendingPeakMovementSteps = 0;
+        isMoving = false;
+        isResolvingSpace = false;
+        isDead = false;
+
+        hand.Clear();
+        equippedTreasures.Clear();
+        titles.Clear();
+        cleansedTitles.Clear();
+
+        UpdateMaxStats();
+        currentHP = maxHP;
+        currentMight = baseMight;
+        currentArcane = baseArcane;
+
+        ApplyBoardSprite();
+        SetBoardPresenceVisible(true);
+        PlaceAtIndex(startingIndex);
+        SetActiveVisual(false);
+        RefreshHUD();
+    }
+
     private void ConfigureOutlineVisual()
     {
         if (outlineSpriteRenderer == null)

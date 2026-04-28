@@ -38,6 +38,7 @@ public class CombatManager : MonoBehaviour
     private bool pendingCombatWon;
     private bool pendingCombatEndedGame;
     private string pendingSceneContinueMessage;
+    private List<Monster> currentSelectionOptions = new List<Monster>();
 
     private void Awake()
     {
@@ -76,6 +77,7 @@ public class CombatManager : MonoBehaviour
         CurrentPlayer = player;
         CurrentBiome = biome;
         CurrentMonster = null;
+        currentSelectionOptions = new List<Monster>(availableMonsters);
         pendingCombatRollResults = null;
         displayedCombatRollResults = null;
         pendingCombatRollTotal = 0;
@@ -105,7 +107,7 @@ public class CombatManager : MonoBehaviour
             player,
             biome,
             availableMonsters,
-            BeginCombatAgainstMonster);
+            selectedMonster => GameManager.Instance?.OnMonsterSelectionRequested(player, selectedMonster));
     }
 
     public void StartPeakCombat(PlayerPawn player, BoardSpace returnGateSpace)
@@ -130,6 +132,7 @@ public class CombatManager : MonoBehaviour
         CurrentPlayer = player;
         CurrentBiome = Monster.MonsterBiome.Peak;
         CurrentMonster = null;
+        currentSelectionOptions.Clear();
         pendingCombatRollResults = null;
         displayedCombatRollResults = null;
         pendingCombatRollTotal = 0;
@@ -277,6 +280,43 @@ public class CombatManager : MonoBehaviour
         StartCoroutine(EndCombatRoutine(pendingCombatWon, pendingCombatEndedGame));
     }
 
+    public PlayerPawn GetCurrentMonsterSelectionPlayer()
+    {
+        return CurrentPlayer != null && CurrentMonster == null ? CurrentPlayer : null;
+    }
+
+    public bool TrySelectMonsterByRequest(int optionIndex, string optionId)
+    {
+        if (CurrentPlayer == null || CurrentMonster != null || currentSelectionOptions == null || currentSelectionOptions.Count == 0)
+            return false;
+
+        Monster selectedMonster = null;
+
+        if (optionIndex >= 0 && optionIndex < currentSelectionOptions.Count)
+            selectedMonster = currentSelectionOptions[optionIndex];
+
+        if (selectedMonster == null && !string.IsNullOrWhiteSpace(optionId))
+        {
+            foreach (Monster option in currentSelectionOptions)
+            {
+                if (option != null && option.name == optionId)
+                {
+                    selectedMonster = option;
+                    break;
+                }
+            }
+        }
+
+        if (selectedMonster == null)
+        {
+            Debug.LogWarning($"Monster selection request could not resolve target. OptionIndex={optionIndex}, OptionId={optionId}");
+            return false;
+        }
+
+        BeginCombatAgainstMonster(selectedMonster);
+        return true;
+    }
+
     private void BeginCombatAgainstMonster(Monster monster)
     {
         if (monster == null || CurrentPlayer == null)
@@ -286,6 +326,7 @@ public class CombatManager : MonoBehaviour
         }
 
         CurrentMonster = monster;
+        currentSelectionOptions.Clear();
         monsterMightModifier = 0;
         pendingCombatRollResults = null;
         displayedCombatRollResults = null;
@@ -779,6 +820,7 @@ public class CombatManager : MonoBehaviour
     private void AbortCombatSelection()
     {
         MonsterSelectionUI.Instance?.Hide();
+        currentSelectionOptions.Clear();
 
         if (CurrentPlayer != null)
             CurrentPlayer.isResolvingSpace = false;

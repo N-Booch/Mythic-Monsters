@@ -46,6 +46,7 @@ public class HandUIManager : MonoBehaviour
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
 
+        RemoveLegacyStealCardUI();
         EnsureRuntimeLayout();
         EnsureHeaderExists();
         EnsureCancelButtonExists();
@@ -106,7 +107,9 @@ public class HandUIManager : MonoBehaviour
 
     public void Refresh()
     {
+        RemoveLegacyStealCardUI();
         EnsureRuntimeLayout();
+        RemoveLegacyStealInstructionTexts();
         Clear();
 
         if (viewedPlayer == null)
@@ -316,6 +319,8 @@ public class HandUIManager : MonoBehaviour
         if (handPanel == null)
             return;
 
+        RemoveLegacyStealCardUI();
+        RemoveLegacyStealInstructionTexts();
         handPanel.SetActive(true);
         handPanel.transform.SetAsLastSibling();
         HideEndTurnForHand();
@@ -518,6 +523,51 @@ public class HandUIManager : MonoBehaviour
         cardContentFitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
 
         EnsureEmptyHandText();
+    }
+
+    private void RemoveLegacyStealInstructionTexts()
+    {
+        foreach (Transform child in FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (child == null || child.name != "StealCardInstructionsText")
+                continue;
+
+            TMP_Text legacyText = child.GetComponent<TMP_Text>();
+            if (legacyText != null)
+                legacyText.text = string.Empty;
+
+            child.gameObject.SetActive(false);
+            Destroy(child.gameObject);
+        }
+    }
+
+    private void RemoveLegacyStealCardUI()
+    {
+        foreach (StealCardUI legacyUi in FindObjectsByType<StealCardUI>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (legacyUi == null)
+                continue;
+
+            TMP_Text legacyText = legacyUi.GetComponentInChildren<TMP_Text>(true);
+            if (legacyText != null)
+                legacyText.text = string.Empty;
+
+            legacyUi.gameObject.SetActive(false);
+            Destroy(legacyUi.gameObject);
+        }
+
+        foreach (Transform child in FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (child == null || child.name != "StealCardUI")
+                continue;
+
+            TMP_Text legacyText = child.GetComponentInChildren<TMP_Text>(true);
+            if (legacyText != null)
+                legacyText.text = string.Empty;
+
+            child.gameObject.SetActive(false);
+            Destroy(child.gameObject);
+        }
     }
 
     private RectTransform EnsureChildRect(Transform parent, string name)

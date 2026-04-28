@@ -44,6 +44,15 @@ public class BoardActionBarLayoutUI : MonoBehaviour
         ApplyLayout();
     }
 
+    public void SetVisible(bool visible)
+    {
+        if (panelRect == null)
+            ApplyLayout();
+
+        if (panelRect != null)
+            panelRect.gameObject.SetActive(visible);
+    }
+
     public void ApplyLayout()
     {
         Canvas canvas = GetMainCanvas();
